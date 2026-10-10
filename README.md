@@ -26,7 +26,7 @@ A Python backend project built with FastAPI and PostgreSQL to support a multi-ve
 ## Project Setup
 ### 1. Clone the repository
 ```bash
-git clone YOUR_GITHUB_REPOSITORY_URL
+git clone https://github.com/Thulasiraman-del/multi-vendor-ecommerce.git
 cd multi-vendor-ecommerce
 ```
 ### 2. Create and activate a virtual environment
@@ -67,3 +67,4 @@ Further integration testing and deployment preparation can improve production re
 - Do not use real customer data in development or testing.
 ## Author
 Thulasiraman Srinivasan
+
