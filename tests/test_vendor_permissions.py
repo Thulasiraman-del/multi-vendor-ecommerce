@@ -37,7 +37,7 @@ def test_customer_cannot_access_vendor_orders():
     try:
         response = client.get("/vendors/me/orders")
         assert response.status_code == 403
-        assert response.json()["detail"] == "Vendor account required"
+        assert response.json()["detail"] == "Insufficient permissions"
     finally:
         app.dependency_overrides.clear()
 

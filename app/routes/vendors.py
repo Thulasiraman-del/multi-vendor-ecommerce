@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_role
 from app.models.user import User
 from app.schemas.vendor import VendorCreate, VendorResponse
 from app.schemas.vendor_order import VendorOrderItemResponse
@@ -73,14 +73,10 @@ async def list_my_vendor_orders(
         le=100,
         description="Maximum number of order items to return",
     ),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role("vendor")),
     db: AsyncSession = Depends(get_db),
 ):
-    if current_user.role != "vendor":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Vendor account required",
-        )
+
 
     return await get_vendor_order_items(
         db,

@@ -8,7 +8,9 @@ from app.routes.categories import router as categories_router
 from app.routes.products import router as products_router
 from app.routes.cart import router as cart_router
 from app.routes.orders import router as orders_router
+from app.core.exceptions import register_exception_handlers
 app=FastAPI()
+register_exception_handlers(app)
 app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(vendors_router)

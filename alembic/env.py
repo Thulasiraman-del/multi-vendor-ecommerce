@@ -1,15 +1,13 @@
 from logging.config import fileConfig
+
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
+
 from app.core.config import settings
-from app.core.config import settings
-from app.models.base import Base
-from app.models.user import User  # Import the User model to ensure it's registered with SQLAlchemy
-from app.models.vendor import Vendor  # Import the Vendor model to ensure it's registered with SQLAlchemy
-from app.models.category import Category  # Import the Category model to ensure it's registered with SQLAlchemy
-from app.models.product import Product  # Import the Product model to ensure it's registered with SQLAlchemy
+from app.models import Base
+import app.models
 config = context.config
 
 if config.config_file_name is not None:
