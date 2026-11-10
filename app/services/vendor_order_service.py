@@ -1,6 +1,6 @@
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.vendor import Vendor
@@ -91,3 +91,24 @@ async def get_vendor_order_items(
         dict(row)
         for row in result.mappings().all()
     ]
+async def search_products(
+    db: AsyncSession,
+    search: str | None = None,
+):
+    query = select(Product).where(
+        Product.is_active.is_(True)
+    )
+
+    if search:
+        search_term = f"%{search}%"
+
+        query = query.where(
+            or_(
+                Product.name.ilike(search_term),
+                Product.description.ilike(search_term),
+            )
+        )
+
+    result = await db.execute(query)
+
+    return result.scalars().all()

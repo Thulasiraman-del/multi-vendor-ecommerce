@@ -20,3 +20,10 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local development and backup files
+check_indexes.py
+original_order_service.txt
+
+# Accidental local duplicate
+.txt*

@@ -1,5 +1,14 @@
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from decimal import Decimal
+from typing import Literal
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    status,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,11 +21,13 @@ from app.schemas.product import (
     ProductCreate,
     ProductResponse,
     ProductUpdate,
+    ProductPagination,
 )
 from app.services.product_service import (
     create_product,
     get_category_by_id,
     get_product_by_sku,
+    search_products,
 )
 
 
@@ -34,14 +45,13 @@ async def get_active_vendor(
     current_user: User,
     db: AsyncSession,
 ) -> Vendor:
-    # Only users with the vendor role can manage products
+
     if current_user.role != "vendor":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only vendor accounts can manage products",
         )
 
-    # Find the vendor profile belonging to the current user
     result = await db.execute(
         select(Vendor).where(
             Vendor.user_id == current_user.id
@@ -56,7 +66,6 @@ async def get_active_vendor(
             detail="Vendor profile not found",
         )
 
-    # Only active vendors can manage products
     if not vendor.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -80,9 +89,12 @@ async def create_new_product(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    vendor = await get_active_vendor(current_user, db)
 
-    # Verify that the category exists
+    vendor = await get_active_vendor(
+        current_user,
+        db,
+    )
+
     category = await get_category_by_id(
         db,
         product_data.category_id,
@@ -94,7 +106,6 @@ async def create_new_product(
             detail="Category not found",
         )
 
-    # Prevent duplicate SKUs
     existing_product = await get_product_by_sku(
         db,
         product_data.sku,
@@ -106,7 +117,6 @@ async def create_new_product(
             detail="Product SKU already exists",
         )
 
-    # Create the product under the authenticated vendor
     product = await create_product(
         db,
         vendor.id,
@@ -117,23 +127,72 @@ async def create_new_product(
 
 
 # --------------------------------------------------
-# GET ALL ACTIVE PRODUCTS
+# GET PRODUCTS WITH SEARCH, FILTERS AND PAGINATION
 # --------------------------------------------------
 
 @router.get(
     "",
-    response_model=list[ProductResponse],
+    response_model=ProductPagination,
 )
 async def get_products(
+    search: str | None = Query(
+        default=None,
+        max_length=100,
+    ),
+    category_id: int | None = Query(
+        default=None,
+        gt=0,
+    ),
+    min_price: Decimal | None = Query(
+        default=None,
+        ge=0,
+    ),
+    max_price: Decimal | None = Query(
+        default=None,
+        ge=0,
+    ),
+    sort_by: Literal[
+        "id",
+        "name",
+        "price",
+    ] = "id",
+    sort_order: Literal[
+        "asc",
+        "desc",
+    ] = "asc",
+    page: int = Query(
+        default=1,
+        ge=1,
+    ),
+    limit: int = Query(
+        default=20,
+        ge=1,
+        le=100,
+    ),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Product).where(
-            Product.is_active.is_(True)
-        )
-    )
 
-    products = result.scalars().all()
+    if (
+        min_price is not None
+        and max_price is not None
+        and min_price > max_price
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="min_price cannot be greater than max_price",
+        )
+
+    products = await search_products(
+        db=db,
+        search=search,
+        category_id=category_id,
+        min_price=min_price,
+        max_price=max_price,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        page=page,
+        limit=limit,
+    )
 
     return products
 
@@ -150,28 +209,12 @@ async def get_my_products(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    # Require an active vendor profile
-    vendor_result = await db.execute(
-        select(Vendor).where(
-            Vendor.user_id == current_user.id
-        )
+
+    vendor = await get_active_vendor(
+        current_user,
+        db,
     )
 
-    vendor = vendor_result.scalar_one_or_none()
-
-    if not vendor:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Vendor profile not found",
-        )
-
-    if not vendor.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Vendor account is not active",
-        )
-
-    # Return only this vendor's active products
     result = await db.execute(
         select(Product).where(
             Product.vendor_id == vendor.id,
@@ -179,9 +222,7 @@ async def get_my_products(
         )
     )
 
-    products = result.scalars().all()
-
-    return products
+    return result.scalars().all()
 
 
 # --------------------------------------------------
@@ -198,9 +239,12 @@ async def update_product(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    vendor = await get_active_vendor(current_user, db)
 
-    # Find the requested product
+    vendor = await get_active_vendor(
+        current_user,
+        db,
+    )
+
     result = await db.execute(
         select(Product).where(
             Product.id == product_id
@@ -215,18 +259,23 @@ async def update_product(
             detail="Product not found",
         )
 
-    # Enforce product ownership
     if product.vendor_id != vendor.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only update your own products",
         )
 
-    # Validate the category if it was supplied
-    if product_data.category_id is not None:
+    update_data = product_data.model_dump(
+        exclude_unset=True
+    )
+
+    if (
+        "category_id" in update_data
+        and update_data["category_id"] is not None
+    ):
         category = await get_category_by_id(
             db,
-            product_data.category_id,
+            update_data["category_id"],
         )
 
         if not category:
@@ -234,11 +283,6 @@ async def update_product(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Category not found",
             )
-
-    # Update only fields supplied by the client
-    update_data = product_data.model_dump(
-        exclude_unset=True
-    )
 
     for field, value in update_data.items():
         setattr(product, field, value)
@@ -261,6 +305,7 @@ async def get_product(
     product_id: int,
     db: AsyncSession = Depends(get_db),
 ):
+
     result = await db.execute(
         select(Product).where(
             Product.id == product_id,
@@ -292,9 +337,12 @@ async def delete_product(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    vendor = await get_active_vendor(current_user, db)
 
-    # Find the requested product
+    vendor = await get_active_vendor(
+        current_user,
+        db,
+    )
+
     result = await db.execute(
         select(Product).where(
             Product.id == product_id
@@ -309,14 +357,12 @@ async def delete_product(
             detail="Product not found",
         )
 
-    # Enforce product ownership
     if product.vendor_id != vendor.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only delete your own products",
         )
 
-    # Soft-delete the product
     product.is_active = False
 
     await db.commit()
